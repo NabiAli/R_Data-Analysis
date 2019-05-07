@@ -1,0 +1,1301 @@
+---
+title: "R Code + Solution"
+author: "Suzlon Energy"
+output: 
+  html_document:
+      number_sections: true
+      toc: true
+      fig_width: 4.5
+      code_folding: hide
+      fig_height: 4.5
+      theme: cosmo
+      highlight: tango
+---
+Density Plot with Numeric Column
+```{r}
+i=1
+for(i in 1:ncol(w)){
+  if( (is.numeric(w[,i]))== FALSE )next
+  else{
+    plot(density(w[,i]),main=paste("",names(w[i]),"| std:",round(sd(w[,i]),1),"| mean:",round(mean(w[,i]),1),"| media:",round(median(w[,i]),1),"| var:",round(var(w[,i]),1)))
+  }
+   
+}
+
+
+```
+
+Checking Variance for every Column 
+```{r}
+var_df1  <- sapply(w[,wnum_df], function(x) var(x,na.rm=TRUE))
+```
+
+
+Data table with `Conditional Format +  Download functionality`.
+```{r}
+DT::datatable(p,
+     selection = "single",
+     filter = 'bottom',
+     extensions = c('Buttons', 'ColReorder', 'FixedHeader', 'Scroller'),
+     rownames = FALSE,
+     options = list(
+       dom = 'Bfrtip',
+       searching = T,
+       pageLength = 25,
+       searchHighlight = TRUE,
+       colReorder = TRUE,
+       fixedHeader = TRUE,
+       filter = 'top',
+       buttons = c('copy', 'csv', 'excel', 'print'),
+       paging    = TRUE,
+       deferRender = TRUE,
+       scroller = TRUE,
+       scrollX = TRUE,
+       scrollY = TRUE
+     )
+   ) %>%
+     formatStyle(-c(1),
+                 color = styleInterval(0, c('red','green'))
+                 #backgroundColor = styleInterval(3.4, c('yellow', 'gray'))
+     )
+```
+
+
+
+Heat map using High charter package
+```{r}
+p <- as.matrix(p)
+hchart(p,"heatmap")
+```
+
+Bar plot using rAmCharts
+```{r}
+library(rAmCharts);library(ggplot2)
+amBarplot(x = "Column", y = "Comp.1", data = p,
+                labelRotation = -45,show_values=TRUE, main = "Variable Importance Score-1")
+amBarplot(x = "Column", y = "Comp.2", data = p,
+                labelRotation = -45,show_values=TRUE, main = "Variable Importance Score-2")
+```
+
+Here Column is `Categorical Column` & `Comp.1` is numeric column. 
+
+
+
+Excluding COlumn by names
+```{r}
+names(wnum_df[,-which(names(wnum_df) %in% names(IQR_df))])
+```
+
+
+Scatter plot with category : High charter
+```{r}
+library(highcharter)
+hchart(final_classified, "scatter", hcaes(x = pc.comp1, y = pc.comp2,group=Cluster))
+```
+
+Scatter plot with category : Plotly
+```{r}
+library(plotly)
+plot_ly(data = final_classified, x = ~pc.comp1, y = ~pc.comp2,color=~as.factor(Cluster))%>%
+  add_markers(text=final_classified$Turbine, showlegend = TRUE)
+```
+
+
+
+3D plot in potly
+```{r}
+plot_ly(data = ts, x = ~tsne_y1, y = ~tsne_y2,z=~tsne_y3,color=~as.factor(Cluster))%>%
+  add_markers(text=ts$Turbine, showlegend = TRUE)
+```
+
+
+
+Function for Calling PCA + Clustering
+```{r}
+Call_PCA <-function(predictorX,NOC){
+  
+  #Creating PCA Object----
+  pca <- princomp(predictorX, cor=T) 
+  
+  
+  # Plotting PCA Score----
+   pc.comp <- pca$scores
+   pc.comp1 <- -1*pc.comp[,1] 
+   pc.comp2 <- -1*pc.comp[,2] 
+
+  
+  # Identifying Optimium No of Cluster----
+  set.seed(123)
+  k.max <- 15
+  data <- pc.comp
+  wss <- sapply(1:k.max, 
+                function(k){kmeans(data, k, nstart=50,iter.max = 15 )$tot.withinss})
+  
+  a=data.frame(Cluster = seq(1:length(wss)),Wss = wss)
+  a$diff <- abs(a$Wss - mean(a$Wss))
+  
+  if(missing(NOC)) {
+        NOC <- (which.min(a$diff)-1)
+    } else {
+        NOC 
+      }
+  opt=(which.min(a$diff)-1)
+  
+  scree_plot<- plot(1:k.max, wss,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+  abline(v=opt,col = "Red" ,lty= 4)
+   
+
+
+  #Performing Kmeans Clustering ----
+  X <- cbind(pc.comp1, pc.comp2)
+  cl <- kmeans(X,NOC)
+  # cl$cluster
+  # plot(pc.comp1, pc.comp2,col=cl$cluster)
+  # points(cl$centers, pch=15)
+  
+  az <- cbind(PC1=pc.comp1,PC2=pc.comp2,cluster =cl$cluster )
+  az <- as.data.frame(az)
+ #az <- cbind(az,predictorX)
+  cluster_visual<- ggplot(az , aes(PC1 , PC2 , colour = as.factor(cluster),fill = as.factor(cluster))) +
+    stat_ellipse(geom = "polygon",col="black",alpha = 0.5)+geom_point(shape = 21 , col =     "black")
+  
+  
+return(list(scree_plot,cluster_visual))
+
+  
+}
+```
+
+
+Function for Identifying Opitmium K-Clustering
+```{r}
+kval_optimium <- function(wnum_df){
+  library(cluster)
+        dfc <- as.data.frame(wnum_df)
+    dfc[is.na(dfc)] <- 0
+  
+    k.max <- 7
+    data <- data.frame(scale(dfc))
+    sil <- rep(0, k.max)
+    # Compute the average silhouette width for 
+    # k = 2 to k = 15
+    for(i in 2:k.max){
+      km.res <- kmeans(data, centers = i, nstart = 25)
+      ss <- silhouette(km.res$cluster, dist(data))
+      sil[i] <- mean(ss[, 3])
+    }
+    v = which.max(sil)
+    return(v)
+  
+}
+```
+
+
+
+
+naming column name with text as Col with indexing as sequence no
+```{r}
+names(df) <- paste("col", 1:ncol(df), sep="")
+```
+
+
+Excluding Column by Column name 
+
+```{r}
+exclu_Column <- c("Occurence","Missing_Percentage")
+wnum_df<- wnum_df[ ,!(colnames(wnum_df) %in% exclu_Column)]
+```
+
+Correlation of Fins Column with the other variables of the column.
+```{r, fig.height=10, fig.width=17}
+library(psych)
+pairs.panels(df)
+```
+
+
+
+```{r}
+box(
+  tags$b("Rule Description:"),
+  tags$li("Rule-1: Data Points Above threshold temperature(Q3:47 DegC)"),
+  tags$li("Rule-2: Continous remain incresing(5) Above Set Temprature Threshold(47 DegC)"),
+  tags$li("Rule-3: Median + 5 DegC"),
+  tags$li("Rule-4: Less then 25 DegC")
+)
+```
+
+Summarising all column of a dataframe
+```{r}
+a <- lapply(a , function(x) rbind( mean = mean(x) ,
+                                  sd = sd(x) ,
+                                  median = median(x) ,
+                                  minimum = min(x) ,
+                                  maximum = max(x) ,
+                                  s.size = length(x) ) )
+
+a <- as.data.frame(a)
+a <- data.frame(t(a))
+a <- round(a,3)
+a$variable <- rownames(a)
+a <- a[,c(ncol(a),2:(ncol(a)-1))];rownames(a)<- NULL;a
+```
+
+
+All Column mean by group_by
+```{r}
+a1 %>% group_by(Cluster) %>% summarise_all(mean)
+```
+
+
+Sequence/indexing within the group_by
+```{r}
+library(dplyr)
+df %>% group_by(personid) %>% mutate(id = row_number())
+df %>% group_by(personid) %>% mutate(id = 1:n())
+df %>% group_by(personid) %>% mutate(id = seq_len(n()))
+df %>% group_by(personid) %>% mutate(id = seq_along(personid))
+```
+
+
+
+Checking NA In group by fashion using DPLYR Library
+```{r}
+ sql_df %>% 
+      group_by(PlantUnitName) %>%
+      select_if(function(x) any(is.na(x)))%>% 
+      summarise_all(funs(sum(is.na(.))))%>%
+  ungroup()
+```
+
+
+DPLYR
+```{r}
+set.seed(100)
+ds <- data.frame(group=c(rep("a",100), rep("b",100), rep("c",100)), 
+                 x=rnorm(n = 300, mean = 3, sd = 2), y=rnorm(n = 300, mean = 2, sd = 2))
+ds
+```
+We firstly transform it into a tbl_df object to achieve a better print method. No changes occur on the input data frame. 
+
+```{r}
+ds <- tbl_df(ds)
+ds
+```
+
+```{r}
+# Head of ds
+ds %>% do(head(.))
+```
+
+
+
+```{r}
+# Head of ds by group
+ds %>% group_by(group) %>% do(head(.))
+```
+
+```{r}
+# Tail (last 3 obs) of x by group
+ds %>% group_by(group) %>% do(out=tail(.$x, 3))
+```
+
+
+
+```{r}
+# Tail (last 3 obs) of x by group
+ds %>% group_by(group) %>% do(data.frame(out=tail(.$x, 3)))
+```
+
+
+```{r}
+my_fun <- function(x, y){
+  res_x = mean(x) + 2
+  res_y = mean(y) * 5 
+  return(data.frame(res_x, res_y))
+}
+```
+
+```{r}
+# Apply my_fun() function to ds by group
+ds %>% group_by(group) %>% do(out=my_fun(x=.$x, y=.$y))
+```
+
+
+Applying function from group by for specific column 
+```{r}
+# Apply my_fun() function to ds by group
+ds %>% group_by(group) %>% do(my_fun(x=.$x, y=.$y))
+```
+
+LInk :
+http://www.milanor.net/blog/dplyr-do-tips-for-using-and-programming/
+http://www.milanor.net/blog/aggregation-dplyr-summarise-summarise_each/
+
+
+Density Plot prep for visualisation 
+```{r}
+density_data_prep<- function(s1){
+p1 <- s1 %>%
+  group_by(Tag,PC1)%>%
+  summarise(Freq= n())
+p1$Y <- p1$Freq/sum(p1$Freq)
+p1$Type <- "PC1"
+names(p1) <- c("Tag","X","Freq","Y","Type")
+p1 <- p1[,c("Tag","Type","X","Y")]
+
+
+p2 <- s1 %>%
+  group_by(Tag,PC2)%>%
+  summarise(Freq= n())
+p2$Y <- p2$Freq/sum(p2$Freq)
+p2$Type <- "PC2"
+names(p2) <- c("Tag","X","Freq","Y","Type")
+p2 <- p2[,c("Tag","Type","X","Y")]
+
+
+p3 <- s1 %>%
+  group_by(Tag,PC3)%>%
+  summarise(Freq= n())
+p3$Y <- p3$Freq/sum(p3$Freq)
+p3$Type <- "PC3"
+names(p3) <- c("Tag","X","Freq","Y","Type")
+p3 <- p3[,c("Tag","Type","X","Y")]
+
+
+
+a <- rbind(p1,p2,p3)
+
+return(a)
+ }
+selwtg %>% group_by(Tag) %>% do(density_data_prep(.))
+```
+
+EXAMPLE : Try-catch
+```{r}
+df <- data.frame(Tag = c(1, 1, 1, 1, 2, 2, 2, 2),
+             x = c(9,7,3,2,1,1,1,1),
+             y = c(1,2,3,4,1,2,3,4))
+
+
+###FUNCTION METHOD:01
+# FUNCTION WITH CHECKING STD FIRST AND ACCORDINGLY RETURNING THE VALUE
+# cor_fun<- function(x,y){
+#   if (any(sapply(list(x, y), FUN = sd) == 0)) {
+#     return(mean(x))
+#   } else {
+#     val <- cor(x,y)
+#     return(val)
+#   }
+# }
+
+###FUNCTION METHOD:02
+# FUNCTION WITH TRYCATCH 
+cor_fun<- function(x,y){
+  val <- tryCatch(cor(x, y), error = function(e) e, warning = function(w) w)
+  if (any(class(val) %in% c("simpleWarning", "warning"))) {
+    return(mean(x))
+  } else {
+    return(val)
+  }
+}
+
+
+df %>%
+  group_by(Tag) %>%
+  summarise(c = cor_fun(x,y))
+
+```
+
+
+try-catch [Browse]:for loop check
+```{r}
+i=1
+dv <- data.frame()
+for(i in 44: max(df_600$Tag)){
+  browser()
+ df6 <- subset(df_600 , Tag==i)
+ print(colSums(is.na(df6)))
+ print(summary(df6))
+ print(cor(df6$PC1,df6$PC2))
+ print(cor(df6$PC1,df6$PC3))
+ print(cor(df6$PC2,df6$PC3))
+  c <- data.frame(Cor_PC12 = cor_fun(df6$PC1,df6$PC2),
+                 Cor_PC13 =  cor_fun(df6$PC1,df6$PC3),
+                 Cor_PC23 =  cor_fun(df6$PC2,df6$PC3))
+
+ # c <- data.frame(Cor_PC12 =  cor(df6$PC1,df6$PC2),
+ #                 Cor_PC13 =  cor(df6$PC1,df6$PC3),
+ #                 Cor_PC23 =  cor(df6$PC2,df6$PC3))
+ cat("LOOP:",i,"\n")
+ dv <- rbind(dv , c)
+
+
+}
+```
+
+
+
+```{r}
+#separate into categorical and numeric predictors
+total_num <- cbind(total$set, total[,sapply(total, is.numeric), with = FALSE]) #numeric variables only
+```
+
+count NAs in numeric variables
+```{r}
+natr_num <- data.frame(sapply(total_num, function(y) sum(length(which(is.na(y)))))) #count NAs in numeric variables
+```
+
+
+```{r}
+natr_num$var <- rownames(natr_num)
+colnames(natr_num) <- c("na_count", "var")
+natr_num <- natr_num %>%  #only keep the numeric values that have an NAs count > 1
+  dplyr::filter(na_count > 0) %>%
+  dplyr::mutate(na_perc = na_count / nrow(total_num)) %>%
+  dplyr::arrange(desc(na_count))
+natr_num$na_perc <- round(natr_num$na_per, 2)
+```
+
+
+
+```{r}
+x = data.frame(x = c(1, 2, NA, 3), y = c(NA, NA, 4, 5))
+```
+
+
+```{r}
+apply(x, 2, function(col)sum(is.na(col))/length(col))
+```
+
+For Loop for nested
+```{r}
+x <- matrix(1:6, 2, 3)
+
+for(i in seq_len(nrow(x))) {
+        for(j in seq_len(ncol(x))) {
+                print(x[i, j])
+        }   
+}
+```
+
+
+
+```{r}
+# Group wise summary
+az<- sql_df %>%
+  split(.$PlantUnitName)%>%
+  map(summary)
+
+library(tidyverse)
+sql_df_in35dloss %>%
+  filter(SGrid == 600)%>%
+   select(-c("Local.time","seq"))%>%
+  split(.$Tag)%>%
+  map(summary)
+
+sd_df <- sql_df_in35dloss %>%
+  filter(SGrid == 600)%>%
+  select(-c("Local.time","seq"))%>%
+  group_by(Tag)%>%
+  summarise_all(funs(sd),na.rm=TRUE)%>%
+  ungroup()
+
+# counting 
+sql_df  %>% 
+  select (-c(Local.time,ecode))%>%
+    group_by(PlantUnitName) %>%
+    mutate(N= n())%>%
+    summarise_all(funs(sum(is.na(.))))%>%
+    ungroup()
+```
+
+do.call(cbind, lapply(conv_10, summary))
+
+
+Rounding only columns which are numeric
+```{r}
+result_table <- result_table %>%
+                    mutate_if(is.numeric, round, 2)
+```
+
+
+Time series Feature Engineering 
+```{r}
+sd1 <- df %>%
+      group_by(Tag,Year,Month,Day)%>%
+      summarise(
+        Turbine = unique(Turbine),
+        Local.time = unique(Local),
+        Temp_sumy1 = as.numeric(summary(Temp)[1]),
+        Temp_sumy2 = as.numeric(summary(Temp)[2]),
+        Temp_sumy3 = as.numeric(summary(Temp)[3]),
+        Temp_sumy4 = as.numeric(summary(Temp)[4]),
+        Temp_sumy5 = as.numeric(summary(Temp)[5]),
+        Temp_IQR = IQR(Temp),
+        Temp_mad = mad(Temp),
+        
+        
+        # Temp_acf = acfresid(Temp),
+        # Temp_x_acf1 = acf_features(Temp)[1],
+        # Temp_x_acf10 = acf_features(Temp)[2],
+        # Temp_diff1_acf1 = acf_features(Temp)[3],
+        # Temp_diff1_acf10 = acf_features(Temp)[4],
+        # Temp_diff2_acf1 = acf_features(Temp)[5],
+        # Temp_diff2_acf10 = acf_features(Temp)[6],
+        
+        # Temp_x_pacf5 = pacf_features(Temp)[1],
+        # Temp_diff1x_pacf5 = pacf_features(Temp)[2],
+        # Temp_diff2x_pacf5 = pacf_features(Temp)[3],
+        
+        # Temp_mean =  mean(Temp ,na.rm=TRUE),
+        # Temp_median =  median(Temp ,na.rm=TRUE),
+        # Temp_mode = mlv(Temp,method='mfv')[['M']],
+        Temp_sd =  sd(Temp ,na.rm=TRUE),
+        Temp_var = var(Temp,na.rm=TRUE),
+        
+        Temp_sk = skewness(Temp)[1],
+        Temp_kt = kurtosis(Temp)[1],
+        
+        Temp_min1 = Temp[as.numeric(inflect(Temp,1)$minima[1])] ,
+        Temp_min2 = Temp[as.numeric(inflect(Temp,1)$minima[2])] ,
+        Temp_min3 = Temp[as.numeric(inflect(Temp,1)$minima[3])] ,
+        Temp_max1 = Temp[sort(inflect(Temp,1)$maxima,decreasing = TRUE)[1]],
+        Temp_max2 = Temp[sort(inflect(Temp,1)$maxima,decreasing = TRUE)[2]],
+        Temp_max3 = Temp[sort(inflect(Temp,1)$maxima,decreasing = TRUE)[3]],
+        Temp_lump = lumpiness(Temp),
+        #Temp_entpy = entropy(Temp),# Result is always Na
+        Temp_stab = stability(Temp),
+        #Temp_Lshift = max_level_shift(Temp),
+        #Temp_Vshift = max_var_shift(Temp),
+        #Temp_freq = frequency(Temp),
+        Temp_cros = crossing_points(Temp),
+        Temp_fspot = flat_spots(Temp),
+        Temp_hurst = hurst(Temp),
+        # Temp_unitrt = unitroot_kpss(Temp),
+        # Temp_unitpp = unitroot_pp(Temp),
+        # Temp_Arc_stat = as.numeric(arch_stat(Temp)),
+        # Temp_holt_alpha = as.numeric(holt_parameters(Temp)),
+        # Temp_holt_beta = as.numeric(holt_parameters(Temp)[2]),
+        # Temp_holt_acfres = as.numeric(acfresid(Temp)),
+        #     Temp_2 = measures(Temp)[1],
+        N=n())%>%
+      ungroup()
+```
+
+
+
+Heat Map
+```{r}
+library(highcharter)
+heatmap_matrix <- as.matrix(cor(qa[,2:25]))
+hchart(heatmap_matrix, type = "heatmap")
+```
+
+
+
+Exclude and include columns of data frame
+```{r}
+Exclude_colname <- c("PQ.Index..WPI.","SAP_LOC","Particle.Category.6","Particle.Category.14","TAN.mgKOH.g","Viscosity.40øC.mm2.s")
+include_colname <- setdiff(names(df), Exclude_colname)
+df1 <- df[,include_colname]
+```
+
+
+plotting mean (meanplot) as per cluster/category in the data frame
+```{r fig.height=12, fig.width=16}
+library(gplots)
+i=1
+for(i in 1:ncol(sig_cluster_df)){
+  if(is.numeric(sig_cluster_df[,i])==TRUE){
+    par(mfrow=c(2,1))
+    plotmeans(sig_cluster_df[,i]~az$cluster, digits=2, ccol="red", mean.labels=T, main=paste("",names(sig_cluster_df)[i]))
+    boxplot(sig_cluster_df[,i] ~ cluster, data = sig_cluster_df, outpch = NA,main=paste("",names(sig_cluster_df)[i]))
+    stripchart(sig_cluster_df[,i] ~ cluster, data = sig_cluster_df, 
+               vertical = TRUE, method = "jitter", 
+               pch = 21, col = "maroon", bg = "red", 
+               add = TRUE)
+       } 
+}
+```
+
+
+scaling 
+```{r}
+scaleContinuous = function(data) {
+  binary = apply(data, 2, function(x) {all(x %in% 0:1)}) 
+  data[!binary] = scale(data[!binary])
+  return(data)
+}
+
+scaleContinuous(df)
+```
+
+
+
+
+
+```{r}
+for (i in 1:max(ready_df$Tag)){
+  
+  x <- filter(ready_df,Tag==i)
+  plot(as.ts(x[,26]),type="l",col="green",
+          #ylim=c(20, 75),
+          xlab="Days", ylab="Power",main=paste("",unique(x$Tag)))#de
+     lines(x[,4],col="blue")#nde
+     #lines(x[,7],col="orange")#delta
+     legend("topright", legend=c("pow","ws"),
+            col=c("green","blue"), lty=1:3, cex=0.8)
+  
+}
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+library(dygraphs);library(xts)
+    Plot_line <- function(df,k){
+      pl <- df
+      pl = subset(pl , Tag == k)
+      #name <- file.list[[i]]
+      a1<-xts(pl$ubwspeed, as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s')) 
+      a2<-xts(pl$bwspeed, as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s')) 
+      a3<-xts(pl$apower, as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s')) 
+      
+      a4<-xts(pl$spower, as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s')) 
+      a5<-xts(pl$Ploss, as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s')) 
+      
+      
+      A<-cbind(a1,a2,a3,a4,a5) 
+      dygraph(A,group = "paramter", main = "Power generation Analysis")%>% dyRangeSelector()%>% 
+        dyOptions(useDataTimezone = TRUE)%>% 
+        dySeries("..1", label = "ubwspeed",fillGraph = FALSE,color = "#FF0000", axis = 'y')%>%
+        dySeries("..2", label = "bwspeed",fillGraph = FALSE,color = "#00FF00", axis = 'y')%>%
+        dySeries("..3", label = "apower",fillGraph = FALSE,color = "#0000FF", axis = 'y2')%>%
+        
+        dySeries("..4", label = "spower",fillGraph = FALSE,color = "#800000", axis = 'y')%>%
+        dySeries("..5", label = "ploss",fillGraph = FALSE,color = "#808000", axis = 'y')%>%
+       
+        dyAxis("y", label = "Multiple Variables")
+    }
+   
+    Plot_line(de,8)
+```
+
+
+http://sas-and-r.blogspot.com/2010/05/example-737-calculation-of-hotellings.html
+
+
+```{r}
+hotelling = function(y1, y2) {
+  # check the appropriate dimension
+  k = ncol(y1)
+  k2 = ncol(y2)
+  if (k2!=k) 
+    stop("input matrices must have the same number of columns: y1 has ",
+      k, " while y2 has ", k2)
+     
+  # calculate sample size and observed means
+  n1 = nrow(y1)
+  n2 = nrow(y2)   
+  ybar1= apply(y1, 2, mean); ybar2= apply(y2, 2, mean)
+  diffbar = ybar1-ybar2
+   
+  # calculate the variance of the difference in means
+  v = ((n1-1)*var(y1)+ (n2-1)*var(y2)) /(n1+n2-2)
+   
+  # calculate the test statistic and associated quantities
+  t2 = n1*n2*diffbar%*%solve(v)%*%diffbar/(n1+n2)
+  f = (n1+n2-k-1)*t2/((n1+n2-2)*k)
+  pvalue = 1-pf(f, k, n1+n2-k-1)
+   
+  # return the list of results
+  return(list(pvalue=pvalue, f=f, t2=t2, diff=diffbar))
+}
+```
+
+
+```{r}
+PCA_Insight <- function(df){
+num_col <- names(df[,sapply(df, function(x) (is.numeric(x)))])
+cat_col <- setdiff(names(df),num_col)
+
+cat("*****KNOW YOUR DATA*****",
+  "\nThere are Total",ncol(df),"Features in Data set",
+    "\nWith ",nrow(df),"Observation",
+    "\nThere are",length(num_col),"Numerical Columns",
+    "\nThere are",length(cat_col),"Categorical Columns in Data Set")
+cat("\n-------ALL VARIABLE-------------\n")
+names(df)
+cat("\n-------NUMERIC VARIABLE----------\n")
+print(num_col)
+cat("\n-------CATEGORICAL VARIABLE----------\n")
+print(cat_col)
+
+scaleContinuous = function(data) {
+ data <- data[,sapply(data, function(x) is.numeric(x))]
+ data <- as.data.frame(data)
+  
+  binary = apply(data, 2, function(x) {all(x %in% 0:1)}) 
+  data[!binary] = scale(data[!binary])
+  return(data)
+}
+dfx <- as.data.frame(df)
+df <- scaleContinuous(df[,num_col])
+
+library(psych)
+pairs.panels(df, 
+             method = "pearson", # correlation method
+             hist.col = "#00AFBB",
+             density = TRUE,  # show density plots
+             ellipses = TRUE # show correlation ellipses
+             )
+pca_fit <- prcomp(df,scale. = TRUE)
+pca_var <- pca_fit$sdev^2
+pca_var_per <-round(pca_var/sum(pca_var)*100,1)
+p1<- barplot(pca_var_per,main = "PCA in %",ylab = "Variation in %",xlab = "Principal component", col="blue")
+#mtext(text=pca_var_per-0.01,las=1,side=2,outer=FALSE,at=p1)
+pca_score_plot <- as.data.frame(pca_fit$x) 
+rownames(pca_score_plot) <- dfx$X
+plot(PC1~PC2, xlab = '', ylab = '', main = 'SCORING PLOT', data = pca_score_plot)
+with(pca_score_plot, text(PC1~PC2, labels = row.names(pca_score_plot), pos = 4))
+
+
+plot(as.ts(pca_score_plot$PC1),
+     type = "o",
+     xlab = "Sequence in Order",
+     ylab = "Score-1",
+     main = "PC1 in order", col = "dark red")
+
+
+
+loading_score <- pca_fit$rotation[,1]
+var_score <- abs(loading_score)
+loading_score_ranked <- sort(var_score,decreasing = TRUE)
+top_10varibale <- names(loading_score_ranked[1:10])
+top_10varibale
+LifeCycleSavings <- as.data.frame(pca_fit$rotation) 
+plot(PC1~PC2, xlab = '', ylab = '', main = 'LOADING PLOT', data = LifeCycleSavings)
+with(LifeCycleSavings, text(PC1~PC2, labels = row.names(LifeCycleSavings), pos = 4))
+
+library(highcharter)
+heatmap_matrix <- as.matrix(LifeCycleSavings)
+hchart(heatmap_matrix,type="heatmap")
+}
+```
+
+Automatic Row binding Code
+```{r}
+# SETTING R DIRECTORY & LOADING DATA %%%%%%%%%%%%%%%
+rm(list = ls())
+library(data.table);library(dplyr);library(modeest);library(readxl);library(stringr);library(stringi)
+library(lubridate);library(moments);library(data.table);library(dplyr);library(readxl)
+setwd("D:\\Suzlon R&D Projects\\Power Curve Analysis")
+getwd()
+cat("\n ^^^^^^^^^^^^------^^^^^^^^^^^^\n")
+file_list <- list.files("data")
+tdata  <- read_excel(paste("data//",file_list[4],sep=""))
+names(tdata)[1:26]
+
+
+# INDEX_DF %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+unique_col <- 25
+df <- as.data.frame(tdata)
+f <- names(df[,seq(2, ncol(df),(unique_col ))])
+   
+y=str_replace_all(as.list(f), "\n", " ") 
+z=strsplit(y, " ")
+s=0
+for (i in 1:length(z)){
+  s[[i]] <- as.list(z[[i]][2])} #For Only Tag
+#s[[i]] <- as.list(paste(z[[i]][5],z[[i]][6]))} # For Tag + Variable name
+s <- unlist(s)
+index_df = data.frame(Tag = seq(1:length(s)),Turbine = s)   
+index_df$Turbine <- gsub("\r","",index_df$Turbine)
+index_df
+rm(list=setdiff(ls(),c("tdata","index_df"))) 
+
+# ROW BINDING ALL TURBINE DATA -------------
+unique_col <- 25
+spliz <- paste("c(","TRUE,",paste(rep("FALSE",(unique_col-1)),collapse=","),")")
+spliz <- gsub(" ","",spliz)
+Raw.data <- as.data.frame(tdata)
+temp <- Raw.data[,-c(1)]
+lst <- split.default(temp,cumsum(rep(eval(parse(text=spliz)), ncol(temp)/unique_col)))
+y <- rbindlist(setNames(lst, seq_along(lst)), idcol = "Tag")
+y$Tag <- as.numeric(y$Tag);
+
+names(y)[2:ncol(y)] <- paste("V",seq(1:(ncol(y)-1)),sep = "")
+
+y$Local.time <- rep(Raw.data[,1],max(y$Tag))
+sql_data <- as.data.frame(y)
+sql_data <- sql_data[,c(ncol(sql_data),1:(ncol(sql_data)-1))]
+sql_data$V9 <-NULL # 100% Data Loss
+sql_data
+rm(list=setdiff(ls(),c("tdata","index_df","sql_data")))
+```
+
+
+For loop for dygraph plotting 
+```{r}
+plt <- function(x){
+library(xts)
+don = xts(x = cv[,x], order.by = as.POSIXct(cv$Local_time))
+#don <- cbind(don)
+#names(don)[1]<- names(cv)[x]
+}
+
+res <- lapply(2:(ncol(cv)-1), function(i) dygraph(plt(i), group="temp_rain",main = paste("",dimnames(cv)[[2]][i])))
+htmltools::tagList(res)
+```
+
+
+
+Dygraph Dynamic Column selection and plotting
+```{r}
+start <- as.POSIXct("2012-01-01")
+interval <- 60
+end <- start + as.difftime((nrow(data_in)-1), units="days")
+Local_time<- seq(from=start, by=interval*60*24, to=end)
+
+cv <- cbind(Local_time,data_in)
+
+idi <- which(colnames(cv)== "V2")
+cv1<- cv[,c(1,idi)]
+
+  Plot_line_func <- function(pl){
+    a1<-xts(pl[,2], as.POSIXlt(pl$Local_time, format='%Y-%m-%d',tz = "UTC")) 
+    # a2<-xts(pl[,4], as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s'))
+    # a3<-xts(pl[,5], as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s'))
+    # a4<-xts(pl[,6], as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s'))
+    # a5<-xts(pl[,7], as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s'))
+    # a6<-xts(pl[,8], as.POSIXlt(pl$Local.time, format='%Y-%m-%d %H:%M:%s'))
+    A<-cbind(a1)
+    A <- as.data.frame(A)
+    attributes(A)
+    names(A)[1] <- paste("..",1,sep="")
+    print(A)
+    dygraph(A,group = "medi" ,main = paste(" ",names(cv)[idi]))%>% 
+      dyRangeSelector()%>% 
+      dyOptions(useDataTimezone = TRUE)%>% 
+      dySeries("..1", label = names(cv)[idi],fillGraph = FALSE,color = "red", axis = 'y', strokeWidth = 2, strokePattern = "dashed")%>% 
+      # dySeries("..2", label = names(pl[4]),fillGraph = FALSE,color = "#B8860B", axis = 'y')%>% 
+      # dySeries("..3", label = names(pl[5]),fillGraph = TRUE,color = "#66CDAA", axis = 'y',pointSize = 3)%>% 
+      # dySeries("..4", label = names(pl[6]),fillGraph = TRUE,color = "green", axis = 'y',pointSize = 3)%>% 
+      # dySeries("..5", label = names(pl[7]),fillGraph = TRUE,color = "blue", axis = 'y',pointSize = 3)%>% 
+      # dySeries("..6", label = names(pl[8]),fillGraph = TRUE,color = "black", axis = 'y',pointSize = 3)%>% 
+      dyAxis("y", label = "Multiple Variables")%>% 
+      dyRoller(rollPeriod = 0)
+    
+  }
+  Plot_line_func(cv1)
+```
+
+
+
+Put the name from file in the select input 
+
+```{r}
+renderUI({
+  file_list <- list.files("Input Files_csv//")
+  selectInput("sel_file","", choices = file_list)
+ })
+actionButton('sel_file_bt',label = 'Upload Selected File For Analysis',
+              width='100%')
+
+file_df <- reactive({
+  input$sel_file_bt
+  isolate({
+    # file_list <- list.files("Input Files//")
+    #  v  <- fread(paste("Input Files//",file_list[1],sep=""))
+  v  <- read.csv(paste("Input Files_csv//",input$sel_file,sep=""))
+  v <- v %>%
+    mutate_if(is.numeric, round, 2)
+
+  })
+  return(v)
+})
+```
+
+
+
+
+```{r}
+f1 <- clean_df %>%
+    mutate(
+      Day =format(Local.time,"%d"),
+      Month = format(Local.time,"%m"),
+      Year = format(Local.time,"%Y"),
+      Hour = format(Local.time,"%H"),
+      Minutes = format(Local.time,"%M"),
+      Second = format(Local.time,"%S")) %>%
+    arrange(Tag)
+de <- f1 %>%
+  select(-c(Local.time,Hour,Minutes,Second))%>%
+  group_by(Tag,Year,Month,Day)%>% 
+  summarise_all(mean)%>%
+  ungroup()
+de <- as.data.frame(de)
+de$Local <- as.POSIXct(with(de, paste(Year, Month, Day,sep="-")), "%Y-%m-%d",tz="UTC")
+de$Local <- as.POSIXct(de$Local, "%Y-%m-%d %H:%M:%S",tz = "UTC")
+de$Hour1 <- NULL
+de$Year <- NULL
+de$Month <- NULL
+de$Day <- NULL
+#de$Local <- as.POSIXct(de$Local, "%Y-%m-%d %H:%M:%S",tz = "UTC")
+
+de <- de %>%
+  mutate_if(is.numeric,round,2)
+de <- as.data.frame(de)
+de <- de[,c(ncol(de),1:(ncol(de)-1))]
+Daydata <- as.data.frame(de)
+```
+
+
+
+
+
+Plotly Auto Select visualisation
+```{r}
+library(plotly)                       
+# Example dataframe
+foo <-data.frame( mon  = c("Jan", "Feb", "Mar"),
+                  var_1 = c(100, 200, 300),
+                  var_b = c(80, 250, 280),
+                  var_three = c(150, 120,201)
+)
+
+
+#------------------------------------------------------------------------------
+# UI 
+#------------------------------------------------------------------------------
+ui <- fluidPage(
+  sidebarLayout(
+    sidebarPanel(
+      checkboxGroupInput('show_vars', 'Columns in the dataset', names(foo),
+                         selected = c('mon', 'var_1')),
+      helpText('Select the variables to show in the graph.')
+    ),
+    mainPanel(
+      plotlyOutput("myPlot")
+    )
+  )
+)
+#------------------------------------------------------------------------------
+# SERVER 
+# Need to loop through input$show_vars to show a trace for each one?
+#------------------------------------------------------------------------------
+server <- function(input, output) {
+  # a large table, reative to input$show_vars
+  output$uteTable = renderDataTable({
+    library(ggplot2)
+    ute[, input$show_vars, drop = FALSE]
+  })
+  
+  
+  output$myPlot = renderPlotly({
+    p<- plot_ly(foo, x = ~mon, y = ~var_1, type = 'scatter', mode = 'lines')
+    #p <- plot_ly(x=foo$mon, y=foo$var_1, line = list(shape="linear"))
+ 
+    for (item in input$show_vars) {
+      #p <- add_trace(p, x = foo$mon, y = foo[[item]], evaluate = TRUE)
+      p <- add_trace(p,x = foo$mon, y = foo[[item]],y = ~V3, name = 'V3', mode = 'markers')
+    }
+    print(p)
+  })
+  
+  
+  
+
+}
+shinyApp(ui = ui, server = server)
+```
+
+
+
+
+
+```{r}
+library(profvis)
+profvis({
+  rm(list = ls())
+  # Creating Dummy data 
+  row_id <- 100
+  No_of_level <- 4
+  spliz <- paste("c(","TRUE,",paste(rep("FALSE",(row_id-1)),collapse=","),")")
+  d <- as.data.frame(matrix(,nrow = row_id*No_of_level ,ncol=2))
+  names(d) <- c("Tag","y_pred")
+  d$Tag <-  cumsum(rep(eval(parse(text=spliz)),4))
+  d$y_pred <- sample(3:4, row_id*No_of_level, rep = TRUE)
+  d$y_pred <- paste("L",d$y_pred,sep="")
+  #### ------------------------------------
+  
+  
+  v <- do.call(rbind, 
+             lapply(split(d, d$Tag), function(s){
+               res <- s
+               res$R2 <- ifelse(as.character(res$y_pred) == "L3", 1, 0)
+               res$seq <- seq_along(1:nrow(res))
+               re$Aoc <- (1-(res$R2/res$seq))*100
+               res$Aoc1 <- (res$R2/res$seq)
+               res
+             }))
+  
+  
+  # How to replce Below For Loop codes to lapply and get the result in the variable.     
+  # v <- data.frame();i=0
+  # for (i in (1:max(d$Tag))){
+  #   #i=4
+  #   s <- filter(d , Tag == i)
+  #   s$y_pred <- as.character(s$y_pred)
+  #   temp = 0
+  #   for(i in 1:nrow(s))
+  #   s$R2[i] <- ifelse(s$y_pred[i] == "L3", temp <- temp + 1, 0)
+  #   s$seq <- seq_along(1:nrow(s))
+  #   s$Aoc <- (1-(s$R2/s$seq))*100
+  #   s$Aoc1 <- (s$R2/s$seq)
+  #   v <- rbind(v,s)
+  # }
+  
+})
+```
+
+
+
+Creting New List of Folder if not available 
+```{r}
+list_folder <- c("Input Files","Input Files_csv","Output Files","Process Tables","Reference Data","Source Code","www")
+for (i in 1: length(list_folder)){
+  
+  sub_dir <- list_folder[i]  
+  output_dir <- file.path(main_dir,sub_dir)
+  if(!dir.exists(output_dir)){
+    dir.create(output_dir)
+    
+  }else{
+    print("Dir Already exist")
+  }  
+}
+```
+
+
+Creating data frame of .csv file available in main directory folder
+```{r}
+Fu  <- as.data.frame(matrix(,ncol=2,nrow = length(file.list) ))
+names(Fu) <- c("Sr_No","File_name")
+Fu$File_name <- file.list
+Fu$Sr_No <- seq(1:length(file.list))
+Fu
+```
+
+
+normal or scaling
+```{r}
+    scaleContinuous = function(data) {
+      data <- data[,sapply(data, function(x) is.numeric(x))]
+      data <- as.data.frame(data)
+      
+      binary = apply(data, 2, function(x) {all(x %in% 0:1)}) 
+      data[!binary] = scale(data[!binary])
+      return(data)
+    }
+    dx <- as.data.frame(dx)
+    dx <- scaleContinuous(dx)
+```
+
+
+Auto Naming
+```{r}
+# Automatic Replace column name ---
+name_sake <- names(sql_data)
+
+
+name_sake[which(grepl("Local",name_sake))] <- "Local_time"
+name_sake[which(grepl("Outdoor Temp Average",name_sake))] <- "outdoor_temp"
+name_sake[which(grepl("Wind Speed Average",name_sake))] <- "Wspeed"
+name_sake[which(grepl("Oil Sump Temp Average",name_sake))] <- "Oil_sump_temp"
+name_sake[which(grepl("Temp HSS DE Average",name_sake))] <- "Temp_hss_de"
+name_sake[which(grepl("Temp HSS NDE Average",name_sake))] <- "Temp_hss_nde"
+name_sake[which(grepl("Temp IMS DE Average",name_sake))] <- "Temp_ims_de"
+name_sake[which(grepl("Temp IMS NDE Average",name_sake))] <- "Temp_ims_nde"
+name_sake[which(grepl("Generator Speed Average",name_sake))] <- "Gspeed"
+name_sake[which(grepl("Temp Fluid Coupling Average",name_sake))] <- "Temp_fluidcoup"
+name_sake[which(grepl("Temp Generator Bearing DE Average",name_sake))] <- "Temp_GB_de"
+name_sake[which(grepl("Temp Generator Bearing NDE Average",name_sake))] <- "Temp_GB_nde"
+name_sake[which(grepl("Nacelle Temp Average",name_sake))] <- "Temp_nach"
+name_sake[which(grepl("Pitch Angle 1 Average",name_sake))] <- "Pa1"
+name_sake[which(grepl("Pitch Angle 2 Average",name_sake))] <- "Pa2"
+name_sake[which(grepl("Pitch Angle 3 Average",name_sake))] <- "Pa3"
+name_sake[which(grepl("Pitch Current 1 Average",name_sake))] <- "Pc1"
+name_sake[which(grepl("Pitch Current 2 Average",name_sake))] <- "Pc2"
+name_sake[which(grepl("Pitch Current 3 Average",name_sake))] <- "Pc3"
+name_sake[which(grepl("Event Code Absolute",name_sake))] <- "Ecode"
+name_sake[which(grepl("Seconds Grid Connection",name_sake))] <- "Gconn"
+name_sake[which(grepl("Temp Main Bearing Average",name_sake))] <- "Temp_mb"
+name_sake[which(grepl("Active Power Average",name_sake))] <- "Apower"
+name_sake[which(grepl("Current Asymmetry Average",name_sake))] <- "Casym"
+name_sake[which(grepl("Reactive Power Average",name_sake))] <- "Rpower"
+name_sake[which(grepl("Rotor Speed Average",name_sake))] <- "Rspeed"
+name_sake[which(grepl("Drive Train Vibration Maximum",name_sake))] <- "Dvib_max"
+
+names(sql_data) <- name_sake
+```
+
+
+
+
+```{r}
+library(rAmCharts)
+    data("data_stock_2")
+    data_stock_2 <- data_stock_2[1:50, ]
+    data_stock_2$ts1low <- data_stock_2$ts1-100
+    data_stock_2$ts1up <- data_stock_2$ts1+100
+    amTimeSeries(data_stock_2, "date", list(c("ts1low", "ts1", "ts1up"), "ts2"), 
+                color = c("red", "blue"), bullet = c("round", "square"))
+```
+
+
+
+```{r}
+Plot_line_func <- function(pl,cv){
+     #cv <- "outdoor_temp"
+     #pl <- as.data.frame(df)
+     idi <- which(colnames(pl) == cv)
+     idi1 <- which(colnames(pl) == "Apower")
+     idi2 <- which(colnames(pl) == "Rpower")
+     st1<- pl[,c(1,idi,idi1,idi2)]
+    # st1$Anom_mark <- ifelse(st1$Anom_mark == "Yes",max(st1[,2])+2,"NA")
+    # st1$Local_time <- as.POSIXct(as.character(st1$Local_time), format='%Y-%m-%d')
+     library(xts);library(dygraphs)
+     #pl <- st1
+     a1<- xts(st1[,2],order.by = st1[,1]) 
+      a2<- xts(st1[,3],order.by = st1[,1]) 
+       a3<- xts(st1[,4],order.by = st1[,1]) 
+
+     A<-cbind(a1,a2,a3)
+     A <- as.data.frame(A)
+     #attributes(A)
+      names(A)[1:ncol(A)] <- paste("..",seq(1:ncol(A)),sep = "")
+     #print(A)
+    dygraph(A,group = "medi" )%>% 
+      dyRangeSelector() %>% 
+      dyOptions(useDataTimezone = FALSE)%>% 
+      dySeries("..1", label = names(pl[idi]),fillGraph = FALSE,color = "blue", axis = 'y') %>%
+      dySeries("..2", label = names(pl[idi1]),fillGraph = FALSE,color = "#DC143C", axis = 'y2',strokeWidth = 2,strokePattern = "dashed")%>% 
+      dySeries("..3", label = names(pl[idi2]),fillGraph = TRUE,color = "red", axis = 'y',strokeWidth = 2,pointSize = 4)%>% 
+      #dySeries("..4", label = names(mv1[idi_4]),fillGraph = TRUE,color = "green", axis = 'y',pointSize = 3)%>% 
+      dyAxis("y", label = "Multiple Variables") %>% 
+      dyRoller(rollPeriod = 0)
+     
+   }
+ 
+```
+
+
+
+
+```{r}
+Plot_line_func(df,"Oil_sump_temp")
+```
+
+Making pie chart
+```{r}
+plot_piechart <- function(df){
+  # Create data for the graph.
+sq = as.data.frame(table(df$Activity))
+x= sq$Freq
+#x <-  as.data.frame(table(Modelling_out$y_pred))$Var1
+labels <-  (sq$Var1)
+piepercent<- round(100*x/sum(x), 2)
+# Plot the chart.
+pie(x, labels = paste("",piepercent," %","\n",labels), main = "Percentage Distribution",col = rainbow(length(x)))
+# legend("topleft", paste("",labels), cex = 0.8,
+#    fill = rainbow(length(x)))
+  
+}
+
+plot_piechart(df)
+```
+
+
+Correlation Matrix using Highcharter
+```{r}
+library(highcharter)
+heatmap_matrix <- as.matrix(cor(the_data_subset))
+    row.names(heatmap_matrix) <- names(the_data_subset)
+    hchart(heatmap_matrix, type = "heatmap")
+```
+
+
+
+
+```{r}
+i=1
+
+for (i in (min(hdata$Tag) : max(hdata$Tag))){
+  
+  
+  
+  sw = filter(hdata , Tag == i)
+  meds <- table(sw$y_pred,sw$Label)
+  meds <- scale(meds, FALSE, colSums(meds)) * 100
+  my_bar=barplot( meds,beside=TRUE, col=c("green","skyblue","Yellow","Orange","red"), ylab="Frequency (%)", ylim=c(0,100),border = "white",main =   paste("",i,":",file.list[[i]]), srt=45 )
+  
+  text(my_bar, (scale(meds, FALSE, colSums(meds)) * 100),  paste("",round(meds, 1),"%",sep="") , cex=1, pos=3,col="red")
+  legend("topleft", c("L1","L2","L3","L4","L5"), col=c("green","skyblue","Yellow","Orange","red"), lwd=10)
+  
+
+}
+```
+
+
+
+
+
+```{r}
+fz1 <- fz %>%
+  group_by(Tag)%>%
+ mutate(Label = ifelse(Local.time >= max(Local.time)-days(7) , "urgent" ,
+           ifelse(Local.time >= max(Local.time)-days(23) & Local.time < max(Local.time)-days(7) , "short" ,
+           ifelse(Local.time >= max(Local.time)-days(53) & Local.time < max(Local.time)-days(23),"medium","long")))
+   
+ )
+```
+
+Changing date formate
+```{r}
+format(strptime(as.character(df_train$Date.of.Birth)[1], format="%d-%m-%y"),"%d-%m-%Y")
+```
+
+
+
+checking Total no of Unique-id
+```{r echo=FALSE}
+# Converting all int class column to numerical class
+for(i in 1:ncol(df_train)){
+    if((is.integer(df_train[,i]) == TRUE)){
+    df_train[,i] <- as.numeric(df_train[,i])
+    }
+}
+str(df_train)
+```
+
+
+```{r}
+x_var <- !(names(df_train) %in% c("UniqueID","loan_default"))# Features variable
+y_var <- (names(df_train) %in% c("loan_default"))# Target variables
+i_var <- (names(df_train) %in% c("UniqueID"))# index/id variable
+```
+
+
+
+Suppress error message in shiny
+```{r}
+tags$style(type="text/css",
+           ".shiny-output-error { visibility: hidden; }",
+           ".shiny-output-error:before { visibility: hidden; }"
+)
+```
+
